@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define _XOPEN_SOURCE 700
 #include <sys/types.h>
@@ -54,27 +55,45 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     printf("]\n");
 
     if (strcmp(input[0], "ls") == 0) {
-        DIR *directory;
-        struct dirent *ep;
-        if (input[1][0] == '\0') {
-            // ls was not passed any args
-            directory = opendir("./");
-        } else {
-            directory = opendir(&input[1][0]);
+
+        pid_t pid = fork(); // forkinga bør muligens skje før strcmp-sjekken
+        int status;
+
+        if (pid < 0) {
+            printf("Error: unable to fork\n");
         }
 
-        if (directory != NULL) {
-            while ((ep = readdir (directory))) {
-                puts (ep->d_name);
+        if (pid == 0) {
+            DIR *directory;
+            struct dirent *ep;
+            if (input[1][0] == '\0') {
+                // ls was not passed any args
+                directory = opendir("./");
+            } else {
+                directory = opendir(&input[1][0]);
             }
-            (void) closedir(directory);
-        } else {
-            printf("Unable to open dir\n");
+
+            if (directory != NULL) {
+                while ((ep = readdir (directory))) {
+                    puts (ep->d_name);
+                }
+                (void) closedir(directory);
+            } else {
+                printf("Unable to open dir\n");
+            }
+            exit(0);
+            // _exit(EXIT_SUCCESS);
+        } else if (pid > 0) {
+            waitpid(-1, &status, 0);
+
+            if ( WIFEXITED(status) ) {
+                int es = WEXITSTATUS(status);
+                printf("Exit status [%s ...] was %d\n", input[0], es);
+            }
         }
     }
 
     if (strcmp(input[0], "cd") == 0) {
-        printf("cd todo\n");
-
+        printf("cd todo\n"); // TODO
     }
 }
