@@ -169,8 +169,8 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
         cd(input[1]);
     }
 
-    freopen("/dev/tty", "r", stdin);
-    freopen("/dev/tty", "w", stdout);
+    //freopen("/dev/tty", "r", stdin);
+    //freopen("/dev/tty", "w", stdout);
 
     // loop over input and check for &, ;, <, >, |
     // if &, fork and exec
