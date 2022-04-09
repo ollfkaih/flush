@@ -90,71 +90,13 @@ void cd(char dir[MAX_PATH]) {
     }
 }
 
-void forkAndExec(char command[MAX_ARGS][MAX_PATH]) {
-    // get stdin descriptor
-
-
-    pid_t pid = fork();
-    int status;
-
-    if (pid < 0) {
-        printf("Error: unable to fork\n");
-    }
-    if (pid == 0) {
-        if (strcmp(command[0], "ls") == 0) {
-            ls(command[1]);
-            exit(0);
-        } else if (strcmp(command[0], "pwd") == 0) {
-            printf("%s\n", currentDirectory);
-            exit(0);
-        } else if (strcmp(command[0], "clear") == 0 || strcmp(command[0], "cls") == 0) {
-            printf("\033[2J\033[1;1H");
-            exit(0);
-        } else if (strcmp(command[0], "help") == 0) {
-            printf("ls - list files in current directory\n");
-            printf("cd - change directory\n");
-            printf("pwd - print current directory\n");
-            printf("clear - clear screen\n");
-            printf("jobs - prints all running background processes\n");
-            printf("exit - exit program\n");
-            exit(0);
-        } else if (strcmp(command[0],"cd") != 0) {
-            char *args[MAX_ARGS];
-            args[0] = command[0];
-            for (int i = 1; i < MAX_ARGS; i++) {
-                if (strlen(command[i]) > 0) {
-                    args[i] = command[i];
-                } else {
-                    args[i] = NULL;
-                }
-            }
-            args[MAX_ARGS - 1] = NULL;
-            execvp(args[0], args);
-
-            // if execvp fails, print error
-            printf("Error: unable to execute %s\n", args[0]);
-            exit(0);
-        }
-    } else if (pid > 0) {
-        printf("%d", pid);
-        waitpid(-1, &status, 0);
-
-        if ( WIFEXITED(status) ) {
-            // set stdin and stdout to tty
-            freopen("/dev/tty", "r", stdin);
-            freopen("/dev/tty", "w", stdout);     
-
-            // close stdin
-            //close(STDIN_FILENO);
-            // close stdout
-            //close(STDOUT_FILENO);
-
-            int es = WEXITSTATUS(status);
-            printf("Exit status [", es);
-            printArgs(command);
-            printf("] was %d\n", es);
-        }
-    }
+int isSpecial(char string[MAX_PATH]) {
+    if (strcmp(string, ";") == 0) return 1;
+    if (strcmp(string, "&") == 0) return 1;
+    if (strcmp(string, "|") == 0) return 1;
+    if (strcmp(string, ">") == 0) return 1;
+    if (strcmp(string, "<") == 0) return 1;
+    return 0;
 }
 
 void handleInput(char input[MAX_ARGS][MAX_PATH]) {
@@ -169,66 +111,91 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
         cd(input[1]);
     }
 
-    //freopen("/dev/tty", "r", stdin);
-    //freopen("/dev/tty", "w", stdout);
 
-    // loop over input and check for &, ;, <, >, |
-    // if &, fork and exec
-    // if ;, exec
-    // if <, redirect stdin
-    // if >, redirect stdout
-    // if |, fork and exec
-    // if no redirection, exec
-    int execFlag = 0;
-    char command[MAX_ARGS][MAX_PATH];
-    memset(&command, 0, sizeof(command));
-    int commandIndex = 0;
-    
-    for (int i = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++) {
-        if (strcmp(input[i], "&") == 0) {
-            printf("Found &\n");
-            execFlag = 1;
-            // fork and exec
-        } else if (strcmp(input[i], ";") == 0) {
-            printf("Found ;\n");
-            execFlag = 1;
-            // exec
-        } else if (strcmp(input[i], "<") == 0) {
-            printf("Found <\n");
-            // redirect stdin
-            for (int j = i + 1; j < MAX_ARGS; j++) {
-                if (strlen(input[j]) > 0) {
-                    execFlag = 1;
-                    freopen(input[j], "r", stdin);
-                    break;
-                }
-            }
-        } else if (strcmp(input[i], ">") == 0) {
-            printf("Found >\n");
-            // redirect stdout
-            for (int j = i + 1; j < MAX_ARGS; j++) {
-                if (strlen(input[j]) > 0) {
-                    execFlag = 1;
-                    freopen(input[j], "w", stdout);
-                    break;
-                }
-            }
-        } else if (strcmp(input[i], "|") == 0) {
-            execFlag = 1;
-            printf("Found |\n");
-            // fork and exec
-        } else {
-            if (execFlag) {
-                commandIndex = 0;
-                execFlag = 0;
-            }
-            strcpy(&command[commandIndex][0], input[i]);
-            commandIndex++;
-        }
+    pid_t pid = fork();
+    int status;
 
-        if (execFlag)
-            forkAndExec(command);
+    if (pid < 0) {
+        printf("Error: unable to fork\n");
     }
-    // exec last command entered
-    forkAndExec(command);
+    if (pid == 0) {
+        // loop through input and check for <, >, and |
+        // add to args array until we hit a special character
+
+        char *args[MAX_ARGS];
+        int exec = 0;  
+        for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
+            if (exec) {
+                exec = 0;
+                memset(&args, 0, sizeof(args));
+                j = 0;
+            }
+
+            if (strcmp(input[i], "<") == 0) {
+                // redirect stdin
+                freopen(input[i - 1], "r", stdin);
+                //clear args bc only file name is in it
+                memset(&args, 0, sizeof(args));
+                j = -1;
+            } else if (strcmp(input[i], ">") == 0) {
+                // redirect stdout
+                freopen(input[i + 1], "w", stdout);
+                exec = 1;
+            } else if (strcmp(input[i], "|") == 0) {
+                // pipe
+                // fork
+                // exec
+                exec = 1;
+            } else if (strcmp(input[i], "&") == 0) {
+                // background
+                exec = 1;
+            } else {
+                args[j] = input[i];
+            }
+            // potential bug if given 10 args 
+            if (exec || i == MAX_ARGS - 1 || strlen(input[i + 1]) == 0) {
+                if (strcmp(args[0], "ls") == 0) {
+                    if (strlen(args[1]) > 0) {
+                        ls(args[1]);
+                    } else {
+                        ls('\0');
+                    }
+                    exit(0);
+                } else if (strcmp(args[0], "pwd") == 0) {
+                    printf("%s\n", currentDirectory);
+                    exit(0);
+                } else if (strcmp(args[0], "clear") == 0 || strcmp(args[0], "cls") == 0) {
+                    printf("\033[2J\033[1;1H");
+                    exit(0);
+                } else if (strcmp(args[0], "help") == 0) {
+                    printf("ls - list files in current directory\n");
+                    printf("cd - change directory\n");
+                    printf("pwd - print current directory\n");
+                    printf("clear - clear screen\n");
+                    printf("jobs - prints all running background processes\n");
+                    printf("exit - exit program\n");
+                    exit(0);
+                } else if (strcmp(args[0],"cd") != 0) {
+                    args[MAX_ARGS - 1] = NULL;
+                    execvp(args[0], args);
+
+                    //TODO: execvp relaces the current process with a new process, so maybe we should fork and execvp in the old process ?
+                    // This means ampersand is not supported yet
+
+                    // if execvp fails, print error
+                    printf("Error: unable to execute %s\n", args[0]);
+                    exit(0);
+                }
+            }
+        }
+    } else if (pid > 0) {
+        waitpid(-1, &status, 0);
+
+        if ( WIFEXITED(status) ) {
+            int es = WEXITSTATUS(status);
+            printf("Exit status [", es);
+            printArgs(input);
+            printf("] was %d\n", es);
+        }
+    }
 }
