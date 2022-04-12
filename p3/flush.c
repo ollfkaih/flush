@@ -226,7 +226,7 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
         if (external && strcmp(command[0],"cd") != 0) {
             command[MAX_ARGS - 1] = NULL;
             if (execvp(command[0], command) == -1) {
-                printf("[%s] %s\n", command[0], strerror(errno));
+                printf("[%s] %s\n", command[0], strerror(errno)); // TODO these messages are a bit greek, maybe change to custom error messages?
                 if (errno == 13) {
                     printf("[%s] (File probably doesn't exist)\n", command[0]);
                 }
@@ -239,8 +239,14 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
             int status;
             waitpid(pid, &status, 0);
 
-            printArgs(*command); //TODO: fix this, security issue bc env can be read (ls & ls & ls & ls & ls) 
-            //doesnt happen with more than 5 lses? why? 
+            //convert *char[] to char[][] for easier printing bc pointers are scary
+            //(env vars are stored right after program args f.ex.)
+            char args[MAX_ARGS][MAX_PATH];
+            memset(&args, 0, sizeof(args));
+            for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
+                strcpy(args[i], command[i]);
+            }
+            printArgs(&args);
             if (WIFEXITED(status)) {
                 printf(" exited with status %d\n", WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
