@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #define _XOPEN_SOURCE 700
 #include <sys/types.h>
@@ -17,6 +18,8 @@ void inputPrompt(void);
 void handleInput(char input[MAX_ARGS][MAX_PATH]);
 void clearInputBuffer(void);
 int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]);
+
+extern int errno;
 
 void ls(char dir[MAX_PATH]);
 void pwd(char arg[MAX_PATH]);
@@ -55,7 +58,7 @@ void inputPrompt(void) {
     memset(&buffer, 0, sizeof(buffer));
     
     // read input char by char
-    char c;
+    int c;
     while((c = getchar()) != '\n') {
         buffer[strlen(buffer)] = c;
         if (c == EOF) exit(0);
@@ -125,7 +128,7 @@ void pwd(char arg[MAX_PATH]) {
 }
 
 void clear(char arg[MAX_PATH]) {
-    printf("\e[1;1H\e[2J");
+    printf("\e[1;1H\e[2J"); //regex is faster than system("clear"), credits to geekforgeeks
 }
 
 void help(char arg[MAX_PATH]) {
@@ -222,7 +225,13 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
         }
         if (external && strcmp(command[0],"cd") != 0) {
             command[MAX_ARGS - 1] = NULL;
-            execvp(command[0], command);
+            if (execvp(command[0], command) == -1) {
+                printf("[%s] %s\n", command[0], strerror(errno));
+                if (errno == 13) {
+                    printf("[%s] (File probably doesn't exist)\n", command[0]);
+                }
+                exit(1);
+            }
         }
     } else if (pid > 0) {
         //parent
@@ -230,7 +239,8 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
             int status;
             waitpid(pid, &status, 0);
 
-            printArgs(*command); //TODO: fix this
+            printArgs(*command); //TODO: fix this, security issue bc env can be read (ls & ls & ls & ls & ls) 
+            //doesnt happen with more than 5 lses? why? 
             if (WIFEXITED(status)) {
                 printf(" exited with status %d\n", WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
