@@ -16,6 +16,26 @@
 void inputPrompt(void);
 void handleInput(char input[MAX_ARGS][MAX_PATH]);
 void clearInputBuffer(void);
+int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]);
+
+void ls(char dir[MAX_PATH]);
+void pwd(char arg[MAX_PATH]);
+void clear(char arg[MAX_PATH]);
+void help(char arg[MAX_PATH]);
+
+typedef struct {
+    char *name;
+    void (*func) (char argument[MAX_PATH]);
+} builtin_func;
+
+builtin_func builtins[] = {
+    {"ls", &ls},
+    {"pwd", &pwd},
+    {"clear", &clear},
+    {"cls", &clear},
+    {"help", &help},
+    {NULL, NULL}
+};
 
 char currentDirectory[MAX_PATH] = "";
 
@@ -32,8 +52,17 @@ int main(void) {
 void inputPrompt(void) {
     printf("[Flush] %s: ", currentDirectory);
     char buffer[MAX_INPUT_LENGTH];
-    fgets(buffer, MAX_INPUT_LENGTH, stdin);
-    buffer[strcspn(buffer, "\n")] = 0;
+    memset(&buffer, 0, sizeof(buffer));
+    
+    // read input char by char
+    char c;
+    while((c = getchar()) != '\n') {
+        buffer[strlen(buffer)] = c;
+        if (c == EOF) exit(0);
+    }
+    if (strlen(buffer) == 0) {
+        return;
+    }    
 
     char input[MAX_ARGS][MAX_PATH];
     memset(&input, 0, sizeof(input));
@@ -50,19 +79,19 @@ void inputPrompt(void) {
 }
 
 void printArgs(char input[MAX_ARGS][MAX_PATH]) {
-    printf("%s", input[0]);
+    printf("[%s", input[0]);
     for (int i = 1; i < MAX_ARGS; i++) {
         //print only non-empty strings in input
         if (strlen(input[i]) > 0) {
             printf(", %s", input[i]);
         }
     }
+    printf("]");
 }
 
 void ls(char dir[MAX_PATH]) {
     DIR *directory;
-    struct dirent *ep;
-    if (dir[0] == '\0') {
+    if (dir == NULL || dir[0] == '\0') {
         // ls was not passed any args
         directory = opendir("./");
     } else {
@@ -70,6 +99,7 @@ void ls(char dir[MAX_PATH]) {
     }
 
     if (directory != NULL) {
+        struct dirent *ep;
         while ((ep = readdir (directory))) {
             puts (ep->d_name);
         }
@@ -80,122 +110,135 @@ void ls(char dir[MAX_PATH]) {
 }
 
 void cd(char dir[MAX_PATH]) {
-    if (strlen(dir) > 0) {
+    if (dir == NULL || dir[0] == '\0') {
+        // cd was not passed any args
+        chdir(getenv("HOME"));
+    } else {
         if (chdir(&dir[0]) != 0) {
             printf("[cd] Unable to change directory to %s\n", &dir[0]);
-        } 
-    } else {
-        // change to home dir (not required)
-        chdir(getenv("HOME"));
+        }
     }
 }
 
-int isSpecial(char string[MAX_PATH]) {
-    if (strcmp(string, ";") == 0) return 1;
-    if (strcmp(string, "&") == 0) return 1;
-    if (strcmp(string, "|") == 0) return 1;
-    if (strcmp(string, ">") == 0) return 1;
-    if (strcmp(string, "<") == 0) return 1;
-    return 0;
+void pwd(char arg[MAX_PATH]) {
+    printf("%s\n", currentDirectory);
+}
+
+void clear(char arg[MAX_PATH]) {
+    printf("\e[1;1H\e[2J");
+}
+
+void help(char arg[MAX_PATH]) {
+    printf("[help] Available commands:\n");
+    printf("[ls] List files in current directory\n");
+    printf("[cd] Change directory\n");
+    printf("[pwd] Print current directory\n");
+    printf("[clear] Clear screen\n");
+    printf("[exit] Exit program\n");
 }
 
 void handleInput(char input[MAX_ARGS][MAX_PATH]) {
-    printf("handling the following input: [");
+    printf("handling the following input: ");
     printArgs(input);
-    printf("]\n");
+    printf("\n");
 
-    if (strcmp(input[0], "exit") == 0) {
+    char *args[MAX_ARGS];
+    memset(&args, 0, sizeof(args));
+    int exec = 0;
+    int nowait = 0;
+    char inStreamStr[MAX_PATH];
+    char outStreamStr[MAX_PATH];
+    memset(&inStreamStr, 0, sizeof(inStreamStr));
+    memset(&outStreamStr, 0, sizeof(outStreamStr));
+
+    for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
+        if (exec) {
+            exec = 0;
+            nowait = 0;
+            memset(&args, 0, sizeof(args));
+            j = 0;
+        }
+
+        if (strcmp(input[i], "<") == 0) {
+            // redirect stdin
+            strcpy(inStreamStr, input[i-1]);
+            //clear args bc only file name is in it
+            memset(&args, 0, sizeof(args));
+            j = -1;
+        } else if (strcmp(input[i], ">") == 0) {
+            // redirect stdout
+            strcpy(outStreamStr, input[i+1]);
+            exec = 1;
+            i++;
+        } else if (strcmp(input[i], "|") == 0) {
+            // pipe
+            // fork
+            // exec
+            exec = 1;
+        } else if (strcmp(input[i], "&") == 0) {
+            // background
+            exec = 1;
+            nowait = 1;
+        } else {
+            args[j] = input[i];
+        }
+        if (exec) {
+            handleCommand(args, nowait, inStreamStr, outStreamStr);
+        }
+    }
+    handleCommand(args, nowait, inStreamStr, outStreamStr);
+    return;
+}
+
+int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]) {
+    //built-in commands that must be run in this process
+    if (strcmp(command[0], "exit") == 0) {
         printf("Exiting...\n");
         exit(0);
-    } else if (strcmp(input[0], "cd") == 0) {
-        cd(input[1]);
-    }
-
-
+    } else if (strcmp(command[0], "cd") == 0) {
+        cd(command[1]);
+    } 
+    
     pid_t pid = fork();
-    int status;
-
-    if (pid < 0) {
-        printf("Error: unable to fork\n");
-    }
     if (pid == 0) {
-        // loop through input and check for <, >, and |
-        // add to args array until we hit a special character
-
-        char *args[MAX_ARGS];
-        int exec = 0;  
-        for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
-            if (exec) {
-                exec = 0;
-                memset(&args, 0, sizeof(args));
-                j = 0;
-            }
-
-            if (strcmp(input[i], "<") == 0) {
-                // redirect stdin
-                freopen(input[i - 1], "r", stdin);
-                //clear args bc only file name is in it
-                memset(&args, 0, sizeof(args));
-                j = -1;
-            } else if (strcmp(input[i], ">") == 0) {
-                // redirect stdout
-                freopen(input[i + 1], "w", stdout);
-                exec = 1;
-            } else if (strcmp(input[i], "|") == 0) {
-                // pipe
-                // fork
-                // exec
-                exec = 1;
-            } else if (strcmp(input[i], "&") == 0) {
-                // background
-                exec = 1;
-            } else {
-                args[j] = input[i];
-            }
-            // potential bug if given 10 args 
-            if (exec || i == MAX_ARGS - 1 || strlen(input[i + 1]) == 0) {
-                if (strcmp(args[0], "ls") == 0) {
-                    if (strlen(args[1]) > 0) {
-                        ls(args[1]);
-                    } else {
-                        ls('\0');
-                    }
-                    exit(0);
-                } else if (strcmp(args[0], "pwd") == 0) {
-                    printf("%s\n", currentDirectory);
-                    exit(0);
-                } else if (strcmp(args[0], "clear") == 0 || strcmp(args[0], "cls") == 0) {
-                    printf("\033[2J\033[1;1H");
-                    exit(0);
-                } else if (strcmp(args[0], "help") == 0) {
-                    printf("ls - list files in current directory\n");
-                    printf("cd - change directory\n");
-                    printf("pwd - print current directory\n");
-                    printf("clear - clear screen\n");
-                    printf("jobs - prints all running background processes\n");
-                    printf("exit - exit program\n");
-                    exit(0);
-                } else if (strcmp(args[0],"cd") != 0) {
-                    args[MAX_ARGS - 1] = NULL;
-                    execvp(args[0], args);
-
-                    //TODO: execvp relaces the current process with a new process, so maybe we should fork and execvp in the old process ?
-                    // This means ampersand is not supported yet
-
-                    // if execvp fails, print error
-                    printf("Error: unable to execute %s\n", args[0]);
-                    exit(0);
+        if (inStreamStr[0] != '\0') {
+            freopen(inStreamStr, "r", stdin);
+        }
+        if (outStreamStr[0] != '\0') {
+            freopen(outStreamStr, "w", stdout);
+        }
+        // loop over builtins
+        int external = 1; // assume external command
+        for (int i = 0; builtins[i].name != NULL; i++) {
+            if (strcmp(command[0], builtins[i].name) == 0) {
+                external = 0;
+                if (command[1] != NULL && strlen(command[1]) > 0) {
+                    builtins[i].func(command[1]);
+                } else {
+                    builtins[i].func(NULL);
                 }
+                exit(0);
             }
+        }
+        if (external && strcmp(command[0],"cd") != 0) {
+            command[MAX_ARGS - 1] = NULL;
+            execvp(command[0], command);
         }
     } else if (pid > 0) {
-        waitpid(-1, &status, 0);
+        //parent
+        if (!nowait) {
+            int status;
+            waitpid(pid, &status, 0);
 
-        if ( WIFEXITED(status) ) {
-            int es = WEXITSTATUS(status);
-            printf("Exit status [", es);
-            printArgs(input);
-            printf("] was %d\n", es);
+            printArgs(*command); //TODO: fix this
+            if (WIFEXITED(status)) {
+                printf(" exited with status %d\n", WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf(" terminated by signal %d\n", WTERMSIG(status));
+            }
         }
+    } else {
+        printf("[%s] fork failed\n", command[0]);
     }
+    return 0;
 }
