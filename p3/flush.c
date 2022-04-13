@@ -21,7 +21,6 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
 
 extern int errno;
 
-void ls(char dir[MAX_PATH]);
 void pwd(char arg[MAX_PATH]);
 void clear(char arg[MAX_PATH]);
 void help(char arg[MAX_PATH]);
@@ -33,7 +32,6 @@ typedef struct {
 } builtin_func;
 
 builtin_func builtins[] = {
-    /*{"ls", &ls},*/ // I don't know why this is here, ls should not be a builtin
     {"pwd", &pwd},
     {"clear", &clear},
     {"cls", &clear},
@@ -147,26 +145,6 @@ void inputPrompt(void) {
     handleInput(input);
 }
 
-void ls(char dir[MAX_PATH]) {
-    DIR *directory;
-    if (dir == NULL || dir[0] == '\0') {
-        // ls was not passed any args
-        directory = opendir("./");
-    } else {
-        directory = opendir(&dir[0]);
-    }
-
-    if (directory != NULL) {
-        struct dirent *ep;
-        while ((ep = readdir (directory))) {
-            puts (ep->d_name);
-        }
-        (void) closedir(directory);
-    } else {
-        printf("[ls] Unable to open dir\n");
-    }
-}
-
 void cd(char dir[MAX_PATH]) {
     if (dir == NULL || dir[0] == '\0') {
         // cd was not passed any args
@@ -188,7 +166,6 @@ void clear(char arg[MAX_PATH]) {
 
 void help(char arg[MAX_PATH]) {
     printf("[help] Available commands:\n");
-    printf("[ls] List files in current directory\n");
     printf("[cd] Change directory\n");
     printf("[pwd] Print current directory\n");
     printf("[clear] Clear screen\n");
@@ -203,7 +180,9 @@ void jobs(char arg[MAX_PATH]) {
         return;
     }
     while(p) {
-        printf("[%d] %s\n", p->pid, p->command);
+        printf("[%d] ", p->pid);
+        printArgs(p->command);
+        printf("\n");
         p = p->next;
     }
 }
