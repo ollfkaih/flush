@@ -25,6 +25,7 @@ void ls(char dir[MAX_PATH]);
 void pwd(char arg[MAX_PATH]);
 void clear(char arg[MAX_PATH]);
 void help(char arg[MAX_PATH]);
+void jobs(char arg[MAX_PATH]);
 
 typedef struct {
     char *name;
@@ -32,21 +33,86 @@ typedef struct {
 } builtin_func;
 
 builtin_func builtins[] = {
-    {"ls", &ls},
+    /*{"ls", &ls},*/ // I don't know why this is here, ls should not be a builtin
     {"pwd", &pwd},
     {"clear", &clear},
     {"cls", &clear},
     {"help", &help},
+    {"jobs", &jobs},
     {NULL, NULL}
 };
 
+typedef struct process {
+    pid_t pid;
+    char command[MAX_ARGS][MAX_PATH];
+    struct process *next;
+} process;
+
+typedef struct process_list {
+    process *head;
+    process **tail;
+} process_list;
+
+//TODO: Locking/semaphores
+void enqueue(process_list *list, process *p) {
+    p->next = NULL;
+    *list->tail = p;
+    list->tail = &p->next;
+}
+
+void dequeue(process_list *list, process *p) {
+    if (list->head == p) {
+        list->head = p->next;
+    }
+    if (list->tail == &p->next) {
+        list->tail = &list->head;
+    }
+}
+
+void printArgs(char input[MAX_ARGS][MAX_PATH]) {
+    printf("[%s", input[0]);
+    for (int i = 1; i < MAX_ARGS; i++) {
+        //print only non-empty strings in input
+        if (strlen(input[i]) > 0) {
+            printf(" %s", input[i]);
+        }
+    }
+    printf("]");
+}
+
+int isSpecial(char string[MAX_PATH]) {
+    if (strcmp(string, ";") == 0) return 1;
+    if (strcmp(string, "&") == 0) return 1;
+    if (strcmp(string, "|") == 0) return 1;
+    if (strcmp(string, ">") == 0) return 1;
+    if (strcmp(string, "<") == 0) return 1;
+    return 0;
+}
+
 char currentDirectory[MAX_PATH] = "";
+process_list processes = {NULL, &processes.head};
 
 int main(void) {
     printf(" ___________________\n< Welcome to Flush >\n-------------------\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\ \n                ||----w |\n                ||     ||\n");
     memset(&currentDirectory, 0, sizeof(currentDirectory));
 
     while(1) {
+        // kill all processes that have exited
+        process *p = processes.head;
+        while(p) {
+            int status;
+            if(p->pid == waitpid(p->pid, &status, WNOHANG)) {
+                printf("Command ");
+                printArgs(p->command);
+                printf(" with pid %d has exited with status %d\n", p->pid, status);
+                process *next = p->next;
+                free(p);
+                dequeue(&processes, p);
+                p = next;
+            } else {
+                p = p->next;
+            }
+        }
         getcwd(currentDirectory, sizeof(currentDirectory));
         inputPrompt();
     }
@@ -79,17 +145,6 @@ void inputPrompt(void) {
     }
 
     handleInput(input);
-}
-
-void printArgs(char input[MAX_ARGS][MAX_PATH]) {
-    printf("[%s", input[0]);
-    for (int i = 1; i < MAX_ARGS; i++) {
-        //print only non-empty strings in input
-        if (strlen(input[i]) > 0) {
-            printf(", %s", input[i]);
-        }
-    }
-    printf("]");
 }
 
 void ls(char dir[MAX_PATH]) {
@@ -137,7 +192,20 @@ void help(char arg[MAX_PATH]) {
     printf("[cd] Change directory\n");
     printf("[pwd] Print current directory\n");
     printf("[clear] Clear screen\n");
+    printf("[jobs] List all running background jobs\n");
     printf("[exit] Exit program\n");
+}
+
+void jobs(char arg[MAX_PATH]) {
+    process *p = processes.head;
+    if (p == NULL) {
+        printf("[jobs] No jobs running\n");
+        return;
+    }
+    while(p) {
+        printf("[%d] %s\n", p->pid, p->command);
+        p = p->next;
+    }
 }
 
 void handleInput(char input[MAX_ARGS][MAX_PATH]) {
@@ -149,6 +217,8 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     memset(&args, 0, sizeof(args));
     int exec = 0;
     int nowait = 0;
+
+    // allocate strings for io redirection (they are also used as flags, which is fine in this small program)
     char inStreamStr[MAX_PATH];
     char outStreamStr[MAX_PATH];
     memset(&inStreamStr, 0, sizeof(inStreamStr));
@@ -156,20 +226,20 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
 
     for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
         if (exec) {
+            j = 0;
             exec = 0;
             nowait = 0;
             memset(&args, 0, sizeof(args));
-            j = 0;
+            memset(&inStreamStr, 0, sizeof(inStreamStr));
+            memset(&outStreamStr, 0, sizeof(outStreamStr));
         }
 
         if (strcmp(input[i], "<") == 0) {
-            // redirect stdin
             strcpy(inStreamStr, input[i-1]);
-            //clear args bc only file name is in it
+            //clear file name fram args
             memset(&args, 0, sizeof(args));
             j = -1;
         } else if (strcmp(input[i], ">") == 0) {
-            // redirect stdout
             strcpy(outStreamStr, input[i+1]);
             exec = 1;
             i++;
@@ -179,21 +249,22 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
             // exec
             exec = 1;
         } else if (strcmp(input[i], "&") == 0) {
-            // background
             exec = 1;
             nowait = 1;
         } else {
             args[j] = input[i];
         }
-        if (exec) {
+        if (exec || (i == MAX_ARGS - 1 || strlen(input[i + 1]) == 0)) {
             handleCommand(args, nowait, inStreamStr, outStreamStr);
         }
     }
-    handleCommand(args, nowait, inStreamStr, outStreamStr);
     return;
 }
 
 int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]) {
+    if (&command[0][0] == NULL) {
+        return 1;
+    }
     //built-in commands that must be run in this process
     if (strcmp(command[0], "exit") == 0) {
         printf("Exiting...\n");
@@ -234,24 +305,33 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
             }
         }
     } else if (pid > 0) {
-        //parent
+        //convert *char[] to char[][] for easier printing bc pointers are scary
+        //(env vars are stored right after program args f.ex.)
+        char args[MAX_ARGS][MAX_PATH];
+        memset(&args, 0, sizeof(args));
+        for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
+            strcpy(args[i], command[i]);
+        }
+        printArgs(&args);
+        
         if (!nowait) {
             int status;
             waitpid(pid, &status, 0);
 
-            //convert *char[] to char[][] for easier printing bc pointers are scary
-            //(env vars are stored right after program args f.ex.)
-            char args[MAX_ARGS][MAX_PATH];
-            memset(&args, 0, sizeof(args));
-            for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
-                strcpy(args[i], command[i]);
-            }
-            printArgs(&args);
             if (WIFEXITED(status)) {
                 printf(" exited with status %d\n", WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
                 printf(" terminated by signal %d\n", WTERMSIG(status));
             }
+        }
+        else {
+            printf(" [%d] started in background\n", pid);
+            process *p = malloc(sizeof(process));
+            p->pid = pid;
+            for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
+                strcpy(p->command[i], command[i]);
+            }
+            enqueue(&processes, p);
         }
     } else {
         printf("[%s] fork failed\n", command[0]);
