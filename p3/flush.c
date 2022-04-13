@@ -214,18 +214,22 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
         }
 
         if (strcmp(input[i], "<") == 0) {
-            strcpy(inStreamStr, input[i-1]);
-            //clear file name fram args
-            memset(&args, 0, sizeof(args));
-            j = -1;
+            strcpy(inStreamStr, input[++i]);
+            if (input[i + 1][0] != '>') {
+                exec = 1;
+            }
         } else if (strcmp(input[i], ">") == 0) {
-            strcpy(outStreamStr, input[i+1]);
-            exec = 1;
-            i++;
+            strcpy(outStreamStr, input[++i]);
+            if (input[i + 1][0] != '<') {
+                exec = 1;
+            }
         } else if (strcmp(input[i], "|") == 0) {
-            // pipe
-            // fork
-            // exec
+            //create second args array for pipe
+            char pipeArgs[MAX_ARGS][MAX_PATH];
+            memset(&pipeArgs, 0, sizeof(pipeArgs));
+            
+            // pipe args into next command
+            //pipe()
             exec = 1;
         } else if (strcmp(input[i], "&") == 0) {
             exec = 1;
