@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
@@ -14,10 +15,15 @@
 #define MAX_PATH 1024
 #define MAX_ARGS 10
 
+#define DONT_USE_PIPE 0
+#define WRITE_TO_PIPE 1
+#define READ_FROM_PIPE 2
+#define READ_AND_WRITE_TO_PIPE 3
+
 void inputPrompt(void);
 void handleInput(char input[MAX_ARGS][MAX_PATH]);
 void clearInputBuffer(void);
-int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]);
+int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]);
 
 extern int errno;
 
@@ -194,8 +200,10 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
 
     char *args[MAX_ARGS];
     memset(&args, 0, sizeof(args));
-    int exec = 0;
-    int nowait = 0;
+    
+    short exec = 0, nowait = 0;
+    int pipes[2][2];
+    unsigned short pipeIndex = 0, usePipe = DONT_USE_PIPE;
 
     // allocate strings for io redirection (they are also used as flags, which is fine in this small program)
     char inStreamStr[MAX_PATH];
@@ -205,6 +213,11 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
 
     for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
         if (exec) {
+            if (usePipe == WRITE_TO_PIPE || usePipe == READ_AND_WRITE_TO_PIPE) {
+                usePipe = READ_FROM_PIPE;
+                pipeIndex = !pipeIndex;
+            } else if (usePipe == READ_FROM_PIPE)
+                usePipe = DONT_USE_PIPE;
             j = 0;
             exec = 0;
             nowait = 0;
@@ -224,12 +237,11 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
                 exec = 1;
             }
         } else if (strcmp(input[i], "|") == 0) {
-            //create second args array for pipe
-            char pipeArgs[MAX_ARGS][MAX_PATH];
-            memset(&pipeArgs, 0, sizeof(pipeArgs));
-            
-            // pipe args into next command
-            //pipe()
+            if (pipe(pipes[pipeIndex])) {
+                printf("[pipe] Unable to create pipe\n");
+                return;
+            }
+            usePipe = usePipe | WRITE_TO_PIPE;
             exec = 1;
         } else if (strcmp(input[i], "&") == 0) {
             exec = 1;
@@ -238,13 +250,13 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
             args[j] = input[i];
         }
         if (exec || (i == MAX_ARGS - 1 || strlen(input[i + 1]) == 0)) {
-            handleCommand(args, nowait, inStreamStr, outStreamStr);
+            handleCommand(args, nowait, inStreamStr, outStreamStr, usePipe, pipes[!pipeIndex], pipes[pipeIndex]);
         }
     }
     return;
 }
 
-int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH]) {
+int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]) {
     if (&command[0][0] == NULL) {
         return 1;
     }
@@ -254,16 +266,29 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
         exit(0);
     } else if (strcmp(command[0], "cd") == 0) {
         cd(command[1]);
-    } 
+    }
     
     pid_t pid = fork();
     if (pid == 0) {
         if (inStreamStr[0] != '\0') {
-            freopen(inStreamStr, "r", stdin);
+            int inStream = open(inStreamStr, O_RDONLY);
+            dup2(inStream, STDIN_FILENO);
         }
         if (outStreamStr[0] != '\0') {
-            freopen(outStreamStr, "w", stdout);
+            int outStream = open(outStreamStr, O_WRONLY | O_CREAT);
+            dup2(outStream, STDOUT_FILENO);
         }
+        if (usePipe & WRITE_TO_PIPE) {
+            close(writePipeFd[0]);
+            dup2(writePipeFd[1], STDOUT_FILENO);
+            close(writePipeFd[1]);
+        } 
+        if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
+            close(readPipeFd[1]);
+            dup2(readPipeFd[0], STDIN_FILENO);
+            close(writePipeFd[0]);
+        }
+
         // loop over builtins
         int external = 1; // assume external command
         for (int i = 0; builtins[i].name != NULL; i++) {
@@ -300,6 +325,13 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
         if (!nowait) {
             int status;
             waitpid(pid, &status, 0);
+            // close pipes
+            if (usePipe & WRITE_TO_PIPE) {
+                close(writePipeFd[1]);
+            }
+            if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
+                close(readPipeFd[0]);
+            }
 
             if (WIFEXITED(status)) {
                 printf(" exited with status %d\n", WEXITSTATUS(status));
