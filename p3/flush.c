@@ -75,12 +75,11 @@ void dequeue(process_list *list, process *p) {
 
 void printArgs(char input[MAX_ARGS][MAX_PATH]) {
     printf("[%s", input[0]);
-    for (int i = 1; i < MAX_ARGS; i++) {
-        //print only non-empty strings in input
-        if (strlen(input[i]) > 0) {
-            printf(" %s", input[i]);
-        }
+    int i = 1;
+    while ((*input)[i] != NULL && strlen(input[i]) > 0) {
+        printf(" %s", input[i++]);
     }
+    
     printf("]");
 }
 
@@ -198,7 +197,7 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     printArgs(input);
     printf("\n");
 
-    char *args[MAX_ARGS];
+    char *args[MAX_PATH];
     memset(&args, 0, sizeof(args));
     
     short exec = 0, nowait = 0;
@@ -256,10 +255,12 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     return;
 }
 
-int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]) {
+int handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]) {
     if (&command[0][0] == NULL) {
         return 1;
     }
+    command[MAX_ARGS - 1] = NULL;
+
     //built-in commands that must be run in this process
     if (strcmp(command[0], "exit") == 0) {
         printf("Exiting...\n");
@@ -303,7 +304,6 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
             }
         }
         if (external && strcmp(command[0],"cd") != 0) {
-            command[MAX_ARGS - 1] = NULL;
             if (execvp(command[0], command) == -1) {
                 printf("[%s] %s\n", command[0], strerror(errno)); // TODO these messages are a bit greek, maybe change to custom error messages?
                 if (errno == 13) {
@@ -313,19 +313,11 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
             }
         }
     } else if (pid > 0) {
-        //convert *char[] to char[][] for easier printing bc pointers are scary
-        //(env vars are stored right after program args f.ex.)
-        char args[MAX_ARGS][MAX_PATH];
-        memset(&args, 0, sizeof(args));
-        for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
-            strcpy(args[i], command[i]);
-        }
-        printArgs(&args);
+        printArgs(*command);
         
         if (!nowait) {
             int status;
             waitpid(pid, &status, 0);
-            // close pipes
             if (usePipe & WRITE_TO_PIPE) {
                 close(writePipeFd[1]);
             }
