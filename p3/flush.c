@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-#define MAX_INPUT_LENGTH 128
+#define MAX_INPUT_LENGTH 48
 #define MAX_PATH 1024
 #define MAX_ARGS 20 
 
@@ -194,7 +194,7 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     printArgs(input);
     printf("\n");
 
-    char *args[MAX_PATH];
+    char *args[MAX_INPUT_LENGTH];
     
     short exec = 1; // set to 1 to memset arrays before first iteration
     short nowait = 0;
