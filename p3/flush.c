@@ -13,7 +13,7 @@
 
 #define MAX_INPUT_LENGTH 128
 #define MAX_PATH 1024
-#define MAX_ARGS 10
+#define MAX_ARGS 20 
 
 #define DONT_USE_PIPE 0
 #define WRITE_TO_PIPE 1
@@ -27,16 +27,17 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
 
 extern int errno;
 
-void pwd(char arg[MAX_PATH]);
-void clear(char arg[MAX_PATH]);
-void help(char arg[MAX_PATH]);
-void jobs(char arg[MAX_PATH]);
+void pwd(void);
+void clear(void);
+void help(void);
+void jobs(void);
 
 typedef struct {
     char *name;
-    void (*func) (char argument[MAX_PATH]);
+    void (*func) (void);
 } builtin_func;
 
+// array with builtin commands makes loop easier (and adding new commands is easier)
 builtin_func builtins[] = {
     {"pwd", &pwd},
     {"clear", &clear},
@@ -57,7 +58,6 @@ typedef struct process_list {
     process **tail;
 } process_list;
 
-//TODO: Locking/semaphores
 void enqueue(process_list *list, process *p) {
     p->next = NULL;
     *list->tail = p;
@@ -73,29 +73,26 @@ void dequeue(process_list *list, process *p) {
     }
 }
 
+int isAmpOrPipe(char string[MAX_PATH]) {
+    if (strcmp(string, "&") == 0) return 1;
+    if (strcmp(string, "|") == 0) return 1;
+    return 0;
+}
+
 void printArgs(char input[MAX_ARGS][MAX_PATH]) {
     printf("[%s", input[0]);
     int i = 1;
-    while ((*input)[i] != NULL && strlen(input[i]) > 0) {
+    while (*input[i] != NULL && strlen(input[i]) > 0 && !isAmpOrPipe(input[i])) {
         printf(" %s", input[i++]);
     }
-    
     printf("]");
-}
-
-int isSpecial(char string[MAX_PATH]) {
-    if (strcmp(string, ";") == 0) return 1;
-    if (strcmp(string, "&") == 0) return 1;
-    if (strcmp(string, "|") == 0) return 1;
-    if (strcmp(string, ">") == 0) return 1;
-    if (strcmp(string, "<") == 0) return 1;
-    return 0;
 }
 
 char currentDirectory[MAX_PATH] = "";
 process_list processes = {NULL, &processes.head};
 
 int main(void) {
+    //Generated with cowsay
     printf(" ___________________\n< Welcome to Flush >\n-------------------\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\ \n                ||----w |\n                ||     ||\n");
     memset(&currentDirectory, 0, sizeof(currentDirectory));
 
@@ -161,15 +158,15 @@ void cd(char dir[MAX_PATH]) {
     }
 }
 
-void pwd(char arg[MAX_PATH]) {
+void pwd(void) {
     printf("%s\n", currentDirectory);
 }
 
-void clear(char arg[MAX_PATH]) {
+void clear(void) {
     printf("\e[1;1H\e[2J"); //regex is faster than system("clear"), credits to geekforgeeks
 }
 
-void help(char arg[MAX_PATH]) {
+void help(void) {
     printf("[help] Available commands:\n");
     printf("[cd] Change directory\n");
     printf("[pwd] Print current directory\n");
@@ -178,7 +175,7 @@ void help(char arg[MAX_PATH]) {
     printf("[exit] Exit program\n");
 }
 
-void jobs(char arg[MAX_PATH]) {
+void jobs(void) {
     process *p = processes.head;
     if (p == NULL) {
         printf("[jobs] No jobs running\n");
@@ -198,19 +195,18 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     printf("\n");
 
     char *args[MAX_PATH];
-    memset(&args, 0, sizeof(args));
     
-    short exec = 0, nowait = 0;
+    short exec = 1; // set to 1 to memset arrays before first iteration
+    short nowait = 0;
     int pipes[2][2];
     unsigned short pipeIndex = 0, usePipe = DONT_USE_PIPE;
 
     // allocate strings for io redirection (they are also used as flags, which is fine in this small program)
     char inStreamStr[MAX_PATH];
     char outStreamStr[MAX_PATH];
-    memset(&inStreamStr, 0, sizeof(inStreamStr));
-    memset(&outStreamStr, 0, sizeof(outStreamStr));
 
     for (int i = 0, j = 0; i < MAX_ARGS && strlen(input[i]) > 0; i++, j++) {
+        // reset vars after execution
         if (exec) {
             if (usePipe == WRITE_TO_PIPE || usePipe == READ_AND_WRITE_TO_PIPE) {
                 usePipe = READ_FROM_PIPE;
@@ -264,84 +260,75 @@ int handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char o
     //built-in commands that must be run in this process
     if (strcmp(command[0], "exit") == 0) {
         printf("Exiting...\n");
-        exit(0);
+        exit(EXIT_SUCCESS);
     } else if (strcmp(command[0], "cd") == 0) {
         cd(command[1]);
-    }
-    
-    pid_t pid = fork();
-    if (pid == 0) {
-        if (inStreamStr[0] != '\0') {
-            int inStream = open(inStreamStr, O_RDONLY);
-            dup2(inStream, STDIN_FILENO);
-        }
-        if (outStreamStr[0] != '\0') {
-            int outStream = open(outStreamStr, O_WRONLY | O_CREAT);
-            dup2(outStream, STDOUT_FILENO);
-        }
-        if (usePipe & WRITE_TO_PIPE) {
-            close(writePipeFd[0]);
-            dup2(writePipeFd[1], STDOUT_FILENO);
-            close(writePipeFd[1]);
-        } 
-        if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
-            close(readPipeFd[1]);
-            dup2(readPipeFd[0], STDIN_FILENO);
-            close(writePipeFd[0]);
-        }
-
-        // loop over builtins
-        int external = 1; // assume external command
-        for (int i = 0; builtins[i].name != NULL; i++) {
-            if (strcmp(command[0], builtins[i].name) == 0) {
-                external = 0;
-                if (command[1] != NULL && strlen(command[1]) > 0) {
-                    builtins[i].func(command[1]);
-                } else {
-                    builtins[i].func(NULL);
-                }
-                exit(0);
+    } else {
+        pid_t pid = fork();
+        if (pid == 0) {
+            if (inStreamStr[0] != '\0') {
+                int inStream = open(inStreamStr, O_RDONLY);
+                dup2(inStream, STDIN_FILENO);
             }
-        }
-        if (external && strcmp(command[0],"cd") != 0) {
+            if (outStreamStr[0] != '\0') {
+                int outStream = open(outStreamStr, O_WRONLY | O_CREAT);
+                dup2(outStream, STDOUT_FILENO);
+            }
+            if (usePipe & WRITE_TO_PIPE) {
+                close(writePipeFd[0]);
+                dup2(writePipeFd[1], STDOUT_FILENO);
+                close(writePipeFd[1]);
+            } 
+            if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
+                close(readPipeFd[1]);
+                dup2(readPipeFd[0], STDIN_FILENO);
+                close(writePipeFd[0]);
+            }
+
+            // loop over builtins
+            for (int i = 0; builtins[i].name != NULL; i++) {
+                if (strcmp(command[0], builtins[i].name) == 0) {
+                    builtins[i].func();
+                    exit(0);
+                }
+            }
             if (execvp(command[0], command) == -1) {
-                printf("[%s] %s\n", command[0], strerror(errno)); // TODO these messages are a bit greek, maybe change to custom error messages?
+                printf("[%s] %s\n", command[0], strerror(errno));
                 if (errno == 13) {
                     printf("[%s] (File probably doesn't exist)\n", command[0]);
                 }
                 exit(1);
             }
-        }
-    } else if (pid > 0) {
-        printArgs(*command);
-        
-        if (!nowait) {
-            int status;
-            waitpid(pid, &status, 0);
-            if (usePipe & WRITE_TO_PIPE) {
-                close(writePipeFd[1]);
-            }
-            if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
-                close(readPipeFd[0]);
-            }
+        } else if (pid > 0) {
+            printArgs(*command);
+            
+            if (!nowait) {
+                int status;
+                waitpid(pid, &status, 0);
+                if (usePipe & WRITE_TO_PIPE) {
+                    close(writePipeFd[1]);
+                }
+                if ((usePipe & READ_FROM_PIPE) == READ_FROM_PIPE) {
+                    close(readPipeFd[0]);
+                }
 
-            if (WIFEXITED(status)) {
-                printf(" exited with status %d\n", WEXITSTATUS(status));
-            } else if (WIFSIGNALED(status)) {
-                printf(" terminated by signal %d\n", WTERMSIG(status));
+                if (WIFEXITED(status)) {
+                    printf(" exited with status %d\n", WEXITSTATUS(status));
+                } else if (WIFSIGNALED(status)) {
+                    printf(" terminated by signal %d\n", WTERMSIG(status));
+                }
             }
-        }
-        else {
-            printf(" [%d] started in background\n", pid);
-            process *p = malloc(sizeof(process));
-            p->pid = pid;
-            for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
-                strcpy(p->command[i], command[i]);
+            else {
+                printf(" [%d] started in background\n", pid);
+                process *p = malloc(sizeof(process));
+                p->pid = pid;
+                for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
+                    strcpy(p->command[i], command[i]);
+                }
+                enqueue(&processes, p);
             }
-            enqueue(&processes, p);
+        } else {
+            printf("[%s] fork failed\n", command[0]);
         }
-    } else {
-        printf("[%s] fork failed\n", command[0]);
     }
-    return 0;
 }
