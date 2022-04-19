@@ -57,16 +57,38 @@ typedef struct process_list {
 
 void enqueue(process_list *list, process *p) {
     p->next = NULL;
+    if (list->head == NULL) {
+        list->head = p;
+    }
     *list->tail = p;
     list->tail = &p->next;
 }
 
 void dequeue(process_list *list, process *p) {
-    if (list->head == p) {
-        list->head = p->next;
-    }
-    if (list->tail == &p->next) {
-        list->tail = &list->head;
+    process *cursor = list->head;
+    process *prev = NULL;
+
+    while (cursor != NULL) {
+        if (cursor == p) {
+
+            if (p == list->head) {
+                list->head = cursor->next;
+
+                // check if list will be empty after dequeueueueue
+                if (cursor->next == NULL) {
+                    list->tail = NULL;
+                }
+            } else if (p == *list->tail) {
+                prev->next = NULL;
+                list->tail = &prev;
+            } else {
+                prev->next = cursor->next;
+            }
+            free(p);
+            break;
+        }
+        prev = cursor;
+        cursor = cursor->next;
     }
 }
 
@@ -94,6 +116,7 @@ int main(void) {
     memset(&currentDirectory, 0, sizeof(currentDirectory));
 
     while(1) {
+        
         // kill all processes that have exited
         process *p = processes.head;
         while(p) {
@@ -103,7 +126,7 @@ int main(void) {
                 printArgs(p->command);
                 printf(" with pid %d has exited with status %d\n", p->pid, status);
                 process *next = p->next;
-                free(p);
+                
                 dequeue(&processes, p);
                 p = next;
             } else {
