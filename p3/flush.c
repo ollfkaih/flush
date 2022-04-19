@@ -137,7 +137,7 @@ void inputPrompt(void) {
     int c;
     while((c = getchar()) != '\n') {
         buffer[strlen(buffer)] = c;
-        if (c == EOF) exit(0);
+        if (c == EOF) exit(EXIT_SUCCESS);
     }
     if (strlen(buffer) == 0) {
         return;
@@ -290,7 +290,7 @@ void handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char 
             for (int i = 0; builtins[i].name != NULL; i++) {
                 if (strcmp(command[0], builtins[i].name) == 0) {
                     builtins[i].func();
-                    exit(0);
+                    exit(EXIT_SUCCESS);
                 }
             }
             if (execvp(command[0], command) == -1) {
@@ -298,7 +298,7 @@ void handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char 
                 if (errno == 13) {
                     printf("[%s] (File probably doesn't exist)\n", command[0]);
                 }
-                exit(1);
+                exit(EXIT_FAILURE);
             }
         } else if (pid > 0) {
             printArgs(*command);
@@ -322,6 +322,7 @@ void handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char 
             else {
                 printf(" [%d] started in background\n", pid);
                 process *p = (process*) malloc(sizeof(process));
+                memset(p, 0, sizeof(process));
                 p->pid = pid;
                 for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
                     strcpy(p->command[i], command[i]);
