@@ -27,8 +27,6 @@ int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH
 
 extern int errno;
 
-void pwd(void);
-void clear(void);
 void help(void);
 void jobs(void);
 
@@ -39,9 +37,6 @@ typedef struct {
 
 // array with builtin commands makes loop easier (and adding new commands is easier)
 builtin_func builtins[] = {
-    {"pwd", &pwd},
-    {"clear", &clear},
-    {"cls", &clear},
     {"help", &help},
     {"jobs", &jobs},
     {NULL, NULL}
@@ -158,19 +153,9 @@ void cd(char dir[MAX_PATH]) {
     }
 }
 
-void pwd(void) {
-    printf("%s\n", currentDirectory);
-}
-
-void clear(void) {
-    printf("\e[1;1H\e[2J"); //regex is faster than system("clear"), credits to geekforgeeks
-}
-
 void help(void) {
     printf("[help] Available commands:\n");
     printf("[cd] Change directory\n");
-    printf("[pwd] Print current directory\n");
-    printf("[clear] Clear screen\n");
     printf("[jobs] List all running background jobs\n");
     printf("[exit] Exit program\n");
 }
