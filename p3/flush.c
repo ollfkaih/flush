@@ -57,39 +57,29 @@ typedef struct process_list {
 
 void enqueue(process_list *list, process *p) {
     p->next = NULL;
-    if (list->head == NULL) {
-        list->head = p;
-    }
     *list->tail = p;
     list->tail = &p->next;
 }
 
 void dequeue(process_list *list, process *p) {
-    process *cursor = list->head;
+    process *curr = list->head;
     process *prev = NULL;
-
-    while (cursor != NULL) {
-        if (cursor == p) {
-
-            if (p == list->head) {
-                list->head = cursor->next;
-
-                // check if list will be empty after dequeueueueue
-                if (cursor->next == NULL) {
-                    list->tail = NULL;
-                }
-            } else if (p == *list->tail) {
-                prev->next = NULL;
-                list->tail = &prev;
+    while (curr != NULL) {
+        if (curr == p) {
+            if (prev == NULL) {
+                list->head = curr->next;
             } else {
-                prev->next = cursor->next;
+                prev->next = curr->next;
+            }
+            if (p == list->tail) {
+                list->tail = &prev;
             }
             free(p);
-            break;
+            return;
         }
-        prev = cursor;
-        cursor = cursor->next;
-    }
+        prev = curr;
+        curr = curr->next;
+    }   
 }
 
 int isAmpOrPipe(char string[MAX_PATH]) {
@@ -139,7 +129,7 @@ int main(void) {
 }
 
 void inputPrompt(void) {
-    printf("[Flush] %s: ", currentDirectory);
+    printf("%s: ", currentDirectory);
     char buffer[MAX_INPUT_LENGTH];
     memset(&buffer, 0, sizeof(buffer));
     
@@ -151,7 +141,7 @@ void inputPrompt(void) {
     }
     if (strlen(buffer) == 0) {
         return;
-    }    
+    }
 
     char input[MAX_ARGS][MAX_PATH];
     memset(&input, 0, sizeof(input));
