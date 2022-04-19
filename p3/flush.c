@@ -79,7 +79,7 @@ int isAmpOrPipe(char string[MAX_PATH]) {
 void printArgs(char input[MAX_ARGS][MAX_PATH]) {
     printf("[%s", input[0]);
     int i = 1;
-    while (*input[i] != NULL && strlen(input[i]) > 0 && !isAmpOrPipe(input[i])) {
+    while (strlen(input[i]) > 0 && !isAmpOrPipe(input[i])) {
         printf(" %s", input[i++]);
     }
     printf("]");
@@ -308,7 +308,7 @@ void handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char 
             }
             else {
                 printf(" [%d] started in background\n", pid);
-                process *p = malloc(sizeof(process));
+                process *p = (process*) malloc(sizeof(process));
                 p->pid = pid;
                 for (int i = 0; i < MAX_ARGS && command[i] != NULL; i++) {
                     strcpy(p->command[i], command[i]);
