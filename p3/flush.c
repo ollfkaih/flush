@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include <fcntl.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -5,11 +6,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
-
-#define _XOPEN_SOURCE 700
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <sys/stat.h>
+
+// Pipes tested in WSL, but seems to have issues on Linux
 
 #define MAX_INPUT_LENGTH 48
 #define MAX_PATH 1024
@@ -23,7 +25,7 @@
 void inputPrompt(void);
 void handleInput(char input[MAX_ARGS][MAX_PATH]);
 void clearInputBuffer(void);
-int handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]);
+void handleCommand(char *command[MAX_ARGS], int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]);
 
 extern int errno;
 
@@ -87,7 +89,7 @@ char currentDirectory[MAX_PATH] = "";
 process_list processes = {NULL, &processes.head};
 
 int main(void) {
-    //Generated with cowsay
+    // Generated with cowsay
     printf(" ___________________\n< Welcome to Flush >\n-------------------\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\ \n                ||----w |\n                ||     ||\n");
     memset(&currentDirectory, 0, sizeof(currentDirectory));
 
@@ -236,9 +238,9 @@ void handleInput(char input[MAX_ARGS][MAX_PATH]) {
     return;
 }
 
-int handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]) {
+void handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char outStreamStr[MAX_PATH], int usePipe, int readPipeFd[2], int writePipeFd[2]) {
     if (&command[0][0] == NULL) {
-        return 1;
+        return;
     }
     command[MAX_ARGS - 1] = NULL;
 
@@ -257,6 +259,7 @@ int handleCommand(char **command, int nowait, char inStreamStr[MAX_PATH], char o
             }
             if (outStreamStr[0] != '\0') {
                 int outStream = open(outStreamStr, O_WRONLY | O_CREAT);
+                chmod(outStreamStr, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
                 dup2(outStream, STDOUT_FILENO);
             }
             if (usePipe & WRITE_TO_PIPE) {
